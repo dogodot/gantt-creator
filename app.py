@@ -16,7 +16,7 @@ load_dotenv()
 # Attercop logo at the top left, not clickable
 col_logo, _ = st.columns([0.1, 0.9])
 with col_logo:
-    st.image("static/attercop_logo.png", use_column_width=True)
+    st.image("static/attercop_logo.png", use_container_width=True)
 
 # Main title lower on the page
 st.title("Attercop Gantt Generator")
