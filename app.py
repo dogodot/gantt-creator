@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import plotly.figure_factory as ff
-from datetime import datetime
+from datetime import datetime, timedelta
 import re
 import openai
 from dotenv import load_dotenv
@@ -127,16 +127,18 @@ def create_gantt_chart(df, mode="Detail mode (all lines)"):
         if mode == "Phase Headers only" and not is_group:
             continue
         try:
-            start_date = datetime.strptime(row['Start Date'], '%d/%m/%Y').strftime('%Y-%m-%d')
-            end_date = datetime.strptime(row['End Date'], '%d/%m/%Y').strftime('%Y-%m-%d')
-            # Normalize phase name and add number prefix
-            phase = row['Phase'].strip().title()
-            numbered_phase = phase_mapping.get(phase, phase)
+            start_date = datetime.strptime(row['Start Date'], '%d/%m/%Y')
+            end_date = datetime.strptime(row['End Date'], '%d/%m/%Y')
+            
+            # For single-day tasks, set end date to next day to show as one day length
+            if row['Duration (Days)'] == '1':
+                end_date = start_date + timedelta(days=1)
+            
             gantt_data.append({
                 'Task': label,
-                'Start': start_date,
-                'Finish': end_date,
-                'Resource': numbered_phase,
+                'Start': start_date.strftime('%Y-%m-%d'),
+                'Finish': end_date.strftime('%Y-%m-%d'),
+                'Resource': phase_mapping.get(row['Phase'].strip().title(), row['Phase'].strip().title()),
                 'Bold': is_group,
                 'Duration': row['Duration (Days)']
             })
@@ -166,7 +168,7 @@ def create_gantt_chart(df, mode="Detail mode (all lines)"):
                          showgrid_y=True,
                          height=800)
     
-    # Update layout
+    # Update layout with improved x-axis configuration
     fig.update_layout(
         font=dict(size=12),
         xaxis_title="Date",
@@ -176,6 +178,15 @@ def create_gantt_chart(df, mode="Detail mode (all lines)"):
         legend=dict(
             traceorder='normal',
             itemsizing='constant'
+        ),
+        xaxis=dict(
+            type='date',
+            tickformat='%d %b %Y',
+            tickmode='auto',
+            nticks=20,
+            tickangle=45,
+            ticklabelmode='period',
+            dtick='D1'  # Set tick interval to 1 day
         )
     )
 
