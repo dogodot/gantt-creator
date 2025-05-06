@@ -70,13 +70,11 @@ def parse_markdown_table(markdown_text):
             cells = cells[1:]
         if cells and cells[-1] == '':
             cells = cells[:-1]
-        # Detect if this row is a group header (bold in markdown)
+        # Detect if this row is a group header (Task ID ends with .0 or is bold)
         is_group_header = False
-        # Check if any cell is bold (starts and ends with **)
-        for c in cells:
-            if c.startswith('**') and c.endswith('**'):
-                is_group_header = True
-                break
+        if len(cells) > 0:
+            task_id = cells[0].strip('*').strip()
+            is_group_header = task_id.endswith('.0') or (cells[0].startswith('**') and cells[0].endswith('**'))
         # Remove bold markers for all cells
         cells = [cell.strip('*').strip() for cell in cells]
         if len(cells) < len(headers):
@@ -148,15 +146,15 @@ def create_gantt_chart(df, mode="Detail mode (all lines)"):
     # Create DataFrame
     gantt_df = pd.DataFrame(gantt_data)
 
-    # Generate colors for each phase
+    # Generate colors for each unique resource in the DataFrame
     colors = {}
-    for phase in phase_order:
+    for resource in gantt_df['Resource'].unique():
         # Generate a consistent color for each phase
-        random.seed(phase)  # Use phase name as seed for consistent colors
+        random.seed(resource)  # Use resource name as seed for consistent colors
         r = random.randint(0, 200)
         g = random.randint(0, 200)
         b = random.randint(0, 200)
-        colors[phase] = f'rgb({r},{g},{b})'
+        colors[resource] = f'rgb({r},{g},{b})'
 
     # Create the Gantt chart
     fig = ff.create_gantt(gantt_df, 
@@ -202,10 +200,18 @@ def dataframe_to_markdown(df):
 
 
 # Add example markdown with 8 columns per row, even if the last cell is empty
-example_markdown = """Task ID | Task Name | Phase | Duration (Weeks) | Start Date | End Date | Predecessors | Deliverables Mapping
-1 | Phase 1: Initiation & Discovery | Discovery | 2 | 19/05/2025 | 30/05/2025 |  |  
-1.1 | Project Kick-off & Governance Setup | Discovery | 0.5 | 19/05/2025 | 21/05/2025 |  |  |
-1.2 | Request & Review Plenitude Documents | Discovery | 1.5 | 19/05/2025 | 28/05/2025 |  | Input: 1, 2, 3, 6 
+example_markdown = """Task ID | Task Name | Phase | Duration (Days) | Start Date | End Date | Predecessors | Deliverables Mapping |
+| :------ | :------------------------------------------------- | :-------------------------------- | :-------------- | :----------- | :----------- | :----------- | :------------------- |
+**1.0** | **Phase 1: Initiation & Discovery** | **Discovery** | **14** | **19/05/2025** | **30/05/2025** | ** | **Project Charter** |
+1.1 | Project Kick-off & Governance Setup | Discovery | 3 | 19/05/2025 | 21/05/2025 |  | Kick-off Presentation |
+1.2 | Review Existing Documentation | Discovery | 10 | 19/05/2025 | 28/05/2025 |  | Documentation Review Report |
+**2.0** | **Phase 2: Strategy Definition** | **Strategy Definition** | **21** | **31/05/2025** | **20/06/2025** | **1** | **Strategy Document** |
+2.1 | Define Project Strategy | Strategy Definition | 7 | 31/05/2025 | 06/06/2025 | 1.2 | Strategy Framework |
+2.2 | Create Implementation Plan | Strategy Definition | 14 | 07/06/2025 | 20/06/2025 | 2.1 | Implementation Roadmap |
+**3.0** | **Phase 3: Implementation** | **Implementation** | **28** | **21/06/2025** | **18/07/2025** | **2** | **Final Deliverable** |
+3.1 | Initial Setup | Implementation | 7 | 21/06/2025 | 27/06/2025 | 2.2 | Environment Configuration |
+3.2 | Core Development | Implementation | 14 | 28/06/2025 | 11/07/2025 | 3.1 | Core System |
+3.3 | Testing & Review | Implementation | 7 | 12/07/2025 | 18/07/2025 | 3.2 | Test Report |
 """
 
 # Initialize session state
@@ -243,7 +249,7 @@ with col2:
             st.session_state.df,
             num_rows="dynamic",
             use_container_width=True,
-            height=400
+            height=400  # Changed back to original height
         )
         
         # Update markdown if table was edited
