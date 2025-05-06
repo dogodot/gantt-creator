@@ -6,9 +6,14 @@ import re
 import openai
 from dotenv import load_dotenv
 import os
+import random
 
 # Set page to full width
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="Gantt Chart Generator",
+    page_icon="📅",
+    layout="wide"
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -19,7 +24,7 @@ with col_logo:
     st.image("static/attercop_logo.png", use_container_width=True)
 
 # Main title lower on the page
-st.title("Attercop Gantt Generator")
+st.title("Gantt Chart Generator")
 
 def parse_markdown_table(markdown_text):
     # Split the text into lines and remove empty lines
@@ -44,7 +49,7 @@ def parse_markdown_table(markdown_text):
     # Extract headers
     headers = [h.strip().strip('*') for h in lines[header_line].split('|') if h.strip()]
     required_headers = [
-        'Task ID', 'Task Name', 'Phase', 'Duration (Weeks)', 'Start Date', 'End Date', 'Predecessors', 'Deliverables Mapping'
+        'Task ID', 'Task Name', 'Phase', 'Duration (Days)', 'Start Date', 'End Date', 'Predecessors', 'Deliverables Mapping'
     ]
     missing_headers = [h for h in required_headers if h not in headers]
     if missing_headers:
@@ -102,6 +107,20 @@ def parse_markdown_table(markdown_text):
 def create_gantt_chart(df, mode="Detail mode (all lines)"):
     if df is None or df.empty:
         return None
+
+    # First, get the phase order from the group headers
+    phase_order = []
+    for _, row in df[df['IsGroupHeader']].sort_values('Task ID').iterrows():
+        phase_num = row['Task ID'].split('.')[0]  # Get the phase number
+        phase_name = row['Phase'].strip().title()
+        phase_order.append(f"{phase_num}. {phase_name}")
+    
+    # Create phase mapping based on the order from the data
+    phase_mapping = {}
+    for numbered_phase in phase_order:
+        phase_name = numbered_phase.split('. ', 1)[1]  # Get the phase name without the number
+        phase_mapping[phase_name] = numbered_phase
+
     # Prepare data for Gantt chart, preserve row order
     gantt_data = []
     for _, row in df.iterrows():
@@ -112,43 +131,62 @@ def create_gantt_chart(df, mode="Detail mode (all lines)"):
         try:
             start_date = datetime.strptime(row['Start Date'], '%d/%m/%Y').strftime('%Y-%m-%d')
             end_date = datetime.strptime(row['End Date'], '%d/%m/%Y').strftime('%Y-%m-%d')
-            resource = 'Group Header' if is_group else row['Phase']
+            # Normalize phase name and add number prefix
+            phase = row['Phase'].strip().title()
+            numbered_phase = phase_mapping.get(phase, phase)
             gantt_data.append({
                 'Task': label,
                 'Start': start_date,
                 'Finish': end_date,
-                'Resource': resource,
-                'Bold': is_group
+                'Resource': numbered_phase,
+                'Bold': is_group,
+                'Duration': row['Duration (Days)']
             })
         except ValueError:
             continue
-    # Define colors for different phases and group headers
-    colors = {
-        'Group Header': 'rgb(0,0,0)',  # Black for group headers
-        'Discovery': 'rgb(46, 137, 205)',
-        'Strategy Definition': 'rgb(114, 44, 121)',
-        'Use Case Definition': 'rgb(198, 47, 105)',
-        'Planning & Requirements': 'rgb(58, 149, 136)',
-        'Finalisation': 'rgb(107, 127, 135)'
-    }
-    fig = ff.create_gantt(pd.DataFrame(gantt_data), 
-                          colors=colors,
-                          index_col='Resource',
-                          show_colorbar=True,
-                          group_tasks=True,
-                          showgrid_x=True,
-                          showgrid_y=True,
-                          height=800,
-                          title='Project Timeline Gantt Chart')
+
+    # Create DataFrame
+    gantt_df = pd.DataFrame(gantt_data)
+
+    # Generate colors for each phase
+    colors = {}
+    for phase in phase_order:
+        # Generate a consistent color for each phase
+        random.seed(phase)  # Use phase name as seed for consistent colors
+        r = random.randint(0, 200)
+        g = random.randint(0, 200)
+        b = random.randint(0, 200)
+        colors[phase] = f'rgb({r},{g},{b})'
+
+    # Create the Gantt chart
+    fig = ff.create_gantt(gantt_df, 
+                         colors=colors,
+                         index_col='Resource',
+                         show_colorbar=True,
+                         group_tasks=True,
+                         showgrid_x=True,
+                         showgrid_y=True,
+                         height=800)
+    
+    # Update layout
     fig.update_layout(
-        title_x=0.5,
-        title_font_size=24,
         font=dict(size=12),
         xaxis_title="Date",
         yaxis_title="Tasks",
         showlegend=True,
-        width=None
+        width=None,
+        legend=dict(
+            traceorder='normal',
+            itemsizing='constant'
+        )
     )
+
+    # Force the y-axis order
+    fig.update_yaxes(
+        categoryorder='array',
+        categoryarray=phase_order
+    )
+    
     return fig
 
 def dataframe_to_markdown(df):
@@ -296,3 +334,45 @@ for msg in st.session_state.chat_history:
 # ---
 # .env file example (do not commit this file to git):
 # OPENAI_API_KEY=sk-... 
+
+def convert_to_gantt(plan):
+    prompt = """You are an expert Project Manager. Create a markdown gantt chart from this project plan. The plan will have the following columns:
+| Task ID | Task Name | Phase | Duration (Weeks) | Start Date | End Date | Predecessors | Deliverables Mapping |
+| :------ | :---------------------------------------------------- | :-------------------------------- | :--------------- | :----------- | :----------- | :----------- | :------------------- |
+
+Please follow these specific requirements:
+1. Use British English spelling and terminology
+2. All dates must be in DD/MM/YYYY format
+3. Include Group Header lines for each phase in the following format:
+   | **1.0** | **Phase 1: Initiation & Discovery** | **Discovery** | **2** | **19/05/2025** | **30/05/2025** |              |                      |
+4. For task IDs, use decimal format (e.g., 1.1, 1.2, 2.1) where the first number represents the phase
+5. For predecessors, use the Task IDs (e.g., "1.1, 1.2")
+6. For deliverables, provide a brief description of what each task produces
+7. IMPORTANT: Phase names must be EXACTLY the same for both headers and tasks. Do not use abbreviations or variations.
+   - Use "Planning & Requirements" (not "Planning & Req.")
+   - Use "Strategy Definition" (not "Strategy" or "Strategy Def.")
+   - Use "Use Case Definition" (not "Use Cases" or "UCD")
+   - Use "Discovery" (not "Initiation" or "Discovery Phase")
+   - Use "Finalisation" (not "Final" or "Final Phase")
+
+Please analyze the project plan and create a structured markdown table with all tasks, their phases, durations, and dependencies. Include realistic start and end dates based on the current date.
+
+Current date: {current_date}
+
+Project Plan:
+{plan}
+"""
+    
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are an expert Project Manager who creates detailed Gantt charts from project plans. You always use British English and follow the specified formatting requirements exactly. You must use consistent phase names throughout the table."},
+                {"role": "user", "content": prompt.format(current_date=datetime.now().strftime("%d/%m/%Y"), plan=plan)}
+            ],
+            temperature=0.7
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Error calling GPT-4: {str(e)}")
+        return None 
